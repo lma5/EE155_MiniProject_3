@@ -7,9 +7,6 @@
 ########################################
 
 import random
-import math as math
-from HMM_helper import *
-
 
 class HiddenMarkovModel:
     '''
@@ -82,39 +79,23 @@ class HiddenMarkovModel:
         probs = [[0. for _ in range(self.L)] for _ in range(M + 1)]
         seqs = [['' for _ in range(self.L)] for _ in range(M + 1)]
 
-        # Calculate initial prefixes and probabilities.
-        for curr in range(self.L):
-            probs[1][curr] = self.A_start[curr] * self.O[curr][x[0]]
-            seqs[1][curr] = str(curr)
-
-        # Calculate best prefixes and probabilities throughout sequence.
-        for t in range(2, M + 1):
-            # Iterate over all possible current states.
-            for curr in range(self.L):
-                max_prob = float("-inf")
-                max_prefix = ''
-
-                # Iterate over all possible previous states to find one
-                # that would maximize the probability of the current state.
-                for prev in range(self.L):
-                    curr_prob = probs[t - 1][prev] \
-                                * self.A[prev][curr] \
-                                * self.O[curr][x[t - 1]]
-
-                    # Continually update max probability and prefix.
-                    if curr_prob >= max_prob:
-                        max_prob = curr_prob
-                        max_prefix = seqs[t - 1][prev]
-
-                # Store the max probability and prefix.
-                probs[t][curr] = max_prob
-                seqs[t][curr] = max_prefix + str(curr)
-
-        # Find the index of the max probability of a sequence ending in x^M
-        # and the corresponding output sequence.
-        max_i = max(enumerate(probs[-1]), key=lambda x: x[1])[0]
-        max_seq = seqs[-1][max_i]
-
+   
+        for i in range(self.L):
+            probs[1][i] = self.O[i][x[0]] * self.A_start[i]
+            seqs[1][i] = str(i)
+        
+        
+        for length in range(2,M+1):
+            for col in range(self.L):
+                # c is the previous ending state
+                # col-column indicates the current ending state
+                # all possibilities: for any previous state, *transaction prob *emitting prob given the current state
+                possi = [probs[length-1][c] * self.A[c][col] * self.O[col][x[length-1]] for c in range(self.L)]
+                probs[length][col] = max(possi)
+                seqs[length][col] = seqs[length-1][possi.index(max(possi))]+str(col)
+                    
+        max_col_idx = probs[-1].index(max(probs[-1]))
+        max_seq =  seqs[-1][max_col_idx]
         return max_seq
 
 
@@ -145,34 +126,18 @@ class HiddenMarkovModel:
 
         M = len(x)      # Length of sequence.
         alphas = [[0. for _ in range(self.L)] for _ in range(M + 1)]
-
-        # Note that alpha_j(0) is already correct for all j's.
-        # Calculate alpha_j(1) for all j's.
-        for curr in range(self.L):
-            alphas[1][curr] = self.A_start[curr] * self.O[curr][x[0]]
-
-        # Calculate alphas throughout sequence.
-        for t in range(1, M):
-            # Iterate over all possible current states.
-            for curr in range(self.L):
-                prob = 0
-
-                # Iterate over all possible previous states to accumulate
-                # the probabilities of all paths from the start state to
-                # the current state.
-                for prev in range(self.L):
-                    prob += alphas[t][prev] \
-                            * self.A[prev][curr] \
-                            * self.O[curr][x[t]]
-
-                # Store the accumulated probability.
-                alphas[t + 1][curr] = prob
-
+        
+        # c here is the initial state
+        alphas[1] = [self.O[c][x[0]] * self.A_start[c] for c in range(self.L)]
+        for length in range(2,M+1):
+            for col in range(self.L):
+                # c is the previous ending state
+                # col-column indicates the current ending state
+                # αz (i+1) = Oxi+1,z∑α j (i)Az, j
+                alphas[length][col] = sum([alphas[length-1][c] * self.A[c][col] * self.O[col][x[length-1]] for c in range(self.L)])
+                
             if normalize:
-                norm = sum(alphas[t + 1])
-                for curr in range(self.L):
-                    alphas[t + 1][curr] /= norm
-
+                alphas[length] = [alpha / sum(alphas[length]) for alpha in alphas[length]]
         return alphas
 
 
@@ -203,39 +168,16 @@ class HiddenMarkovModel:
 
         M = len(x)      # Length of sequence.
         betas = [[0. for _ in range(self.L)] for _ in range(M + 1)]
-
-        # Initialize initial betas.
-        for curr in range(self.L):
-            betas[-1][curr] = 1
-
-        # Calculate betas throughout sequence.
-        for t in range(-1, -M - 1, -1):
-            # Iterate over all possible current states.
-            for curr in range(self.L):
-                prob = 0
-
-                # Iterate over all possible next states to accumulate
-                # the probabilities of all paths from the end state to
-                # the current state.
-                for nxt in range(self.L):
-                    if t == -M:
-                        prob += betas[t][nxt] \
-                                * self.A_start[nxt] \
-                                * self.O[nxt][x[t]]
-
-                    else:
-                        prob += betas[t][nxt] \
-                                * self.A[curr][nxt] \
-                                * self.O[nxt][x[t]]
-
-                # Store the accumulated probability.
-                betas[t - 1][curr] = prob
-
+        
+        betas[M] = [1 for _ in range(self.L)]
+        for length in range(M-1,0,-1):
+            for col in range(self.L):
+                # c is the last ending state
+                # col-column indicates the current ending state
+                betas[length][col] = sum([betas[length+1][c] * self.A[col][c] * self.O[c][x[length]] for c in range(self.L)])
             if normalize:
-                norm = sum(betas[t - 1])
-                for curr in range(self.L):
-                    betas[t - 1][curr] /= norm
-
+                betas[length] = [beta / sum(betas[length]) for beta in betas[length]]
+       
         return betas
 
 
@@ -259,185 +201,81 @@ class HiddenMarkovModel:
         # Similarly, a comment starting with 'M' refers to the fact that
         # the code under the comment is part of the M-step.
 
-        for iteration in range(1, N_iters + 1):
-            print(iteration)
-            if iteration % 10 == 0:
-                print("Iteration: " + str(iteration))
-
-            # Numerator and denominator for the update terms of A and O.
-            A_num = [[0. for i in range(self.L)] for j in range(self.L)]
-            O_num = [[0. for i in range(self.D)] for j in range(self.L)]
-            A_den = [0. for i in range(self.L)]
-            O_den = [0. for i in range(self.L)]
-
-            # For each input sequence:
-            for x in X:
-                M = len(x)
-                # Compute the alpha and beta probability vectors.
-                alphas = self.forward(x, normalize=True)
-                betas = self.backward(x, normalize=True)
-
-                # E: Update the expected observation probabilities for a
-                # given (x, y).
-                # The i^th index is P(y^t = i, x).
-                for t in range(1, M + 1):
-                    P_curr = [0. for _ in range(self.L)]
-
-                    for curr in range(self.L):
-                        P_curr[curr] = alphas[t][curr] * betas[t][curr]
-
-                    # Normalize the probabilities.
-                    norm = sum(P_curr)
-                    for curr in range(len(P_curr)):
-                        P_curr[curr] /= norm
-
-                    for curr in range(self.L):
-                        if t != M:
-                            A_den[curr] += P_curr[curr]
-                        O_den[curr] += P_curr[curr]
-                        O_num[curr][x[t - 1]] += P_curr[curr]
-
-                # E: Update the expectedP(y^j = a, y^j+1 = b, x) for given (x, y)
-                for t in range(1, M):
-                    P_curr_nxt = [[0. for _ in range(self.L)] for _ in range(self.L)]
-
-                    for curr in range(self.L):
-                        for nxt in range(self.L):
-                            P_curr_nxt[curr][nxt] = alphas[t][curr] \
-                                                    * self.A[curr][nxt] \
-                                                    * self.O[nxt][x[t]] \
-                                                    * betas[t + 1][nxt]
-
-                    # Normalize:
-                    norm = 0
-                    for lst in P_curr_nxt:
-                        norm += sum(lst)
-                    for curr in range(self.L):
-                        for nxt in range(self.L):
-                            P_curr_nxt[curr][nxt] /= norm
-
-                    # Update A_num
-                    for curr in range(self.L):
-                        for nxt in range(self.L):
-                            A_num[curr][nxt] += P_curr_nxt[curr][nxt]
-
-            for curr in range(self.L):
-                for nxt in range(self.L):
-                    self.A[curr][nxt] = A_num[curr][nxt] / A_den[curr]
-
-            for curr in range(self.L):
-                for xt in range(self.D):
-                    self.O[curr][xt] = O_num[curr][xt] / O_den[curr]
-                    
-    def get_syl_number(self, syl_dict, obs_map_r, word_item, isend):
-        #print("number passed is ", word_item)
-        word = obs_map_r[word_item]
-        #print("test point 1 value is ", word)
+        # M training examples
+        M = len(X)
+        # each example is X_i
+        P_ijab = [[[[0. for _ in range(self.L)] for _ in range(self.L)]
+                    for _ in range(len(seq)-1)] for seq in X]
+        P_ija = [[[0. for _ in range(self.L)] for _ in range(len(seq))] for seq in X]
         
-        if word_item==486:
-            word=word.lower()
-            #print("conversion test value is ", word)
-        if word_item==483:
-            word=word.lower()
-            #print("conversion test value is ", word)
-            
-        syllable = syl_dict[word][isend]
-        #print("test point 2 value is ", syllable)
-        if not syllable:
-            syl = syl_dict[word][0][0]
-        else:
-            syl = syllable[0]
-            #print("test point 3 value is ", syl)
-        return syl
-
-    def generate_emission_forward(self, M, obs_map_r, syl_dict):
-        '''
-        Generates an emission of M syllables, assuming that the starting state
-        is chosen uniformly at random.
-
-        Arguments:
-            M:          Number of Syllables
-
-        Returns:
-            emission:   The randomly generated emission as a list.
-
-            states:     The randomly generated states as a list.
-        '''
-
-        emission = []
-        states = []
-        syl_count = 0
-        # print(M)
-
-        ### generate the state sequence first
-        # generate the first state
-        r = random.random()
-        s = math.floor(r * self.L)  # need to re write this part with a new start distribution
-        states.append(s)
-        # generate the fist emission
-        r = random.random()
-        threshold = 0
-        for b in range(self.D):
-            threshold += self.O[states[0]][b]
-            if r <= threshold:
-                out = b
-                emission.append(out)
-                break
-        #print(emission[0], out)
-        syl_count += self.get_syl_number(syl_dict, obs_map_r, out, 0)
-
-        ### generate the subsequent states and emissions
-        a=1
-        while a<=M:
-            r = random.random()
-            threshold = 0
-            for b in range(self.L):
-                threshold += self.A[states[a - 1]][b]
-                if r <= threshold:
-                    s = b
-                    states.append(s)
-                    break
-
-            
-            
-            r = random.random()
-            threshold = 0
-            for b in range(self.D):
-                threshold += self.O[states[a]][b]
-                if r <= threshold:
-                    out = b
-                    syl_count += self.get_syl_number(syl_dict, obs_map_r, out, 0)
-                    if syl_count < 10:
-                        emission.append(out)
+        for iteration in range(N_iters):
+            print(iteration)
+            #=======================================
+            # Expectation step
+            for i in range(M):  
+                alphas = self.forward(X[i], True)
+                betas = self.backward(X[i], True)
+                # each stage of an X example
+                for j in range(1, len(X[i])+1):
+                    # slide P75
+                    # For each training x=(x^1,...,x^M)
+                    # Computes each P(y^i=z|x) for y=(y^1,...,y^M)
+                    # for each y^i=z, z=a (self.L possible states)
+                    #initialize 0 for numerator alpha_z(j)*beta_z(j) for each value of z(a)
+                    numer = [0 for _ in range(self.L)]
+                    for a in range(self.L):
+                        numer[a] = alphas[j][a]*betas[j][a] 
+                    # the denominator is the sum of alpha_z'(j)*beta_z'(j) for every z'
+                    denom = sum(numer)
+                    # the demoninator is ths same for every a since it's the sum
+                    P_ija[i][j-1] = [x/denom for x in numer]
+                    
+                    
+                    if j == len(X[i]):
                         break
-                    if syl_count == 10:
-                        if self.get_syl_number(syl_dict, obs_map_r, out, 0) == self.get_syl_number(syl_dict, obs_map_r, out, 1):
-                            emission.append(out)
-                            break
-                        else:
-                            syl_count -= self.get_syl_number(syl_dict, obs_map_r, out, 0)
-                            a-=1
-                            break
-                    if syl_count > 10:
-                        syl_count = syl_count - self.get_syl_number(syl_dict, obs_map_r, out, 0) + self.get_syl_number(syl_dict, obs_map_r, out, 1)
-                        if syl_count > 10:
-                            syl_count -= self.get_syl_number(syl_dict, obs_map_r, out, 1)
-                            a-=1
-                            break
-                        elif syl_count == 10:
-                            emission.append(out)
-                            break
-                        else:
-                            syl_count -= self.get_syl_number(syl_dict, obs_map_r, out, 1)
-                            a-=1
-                            break
-            print("syllable count is", syl_count)
-            if syl_count == 10:
-                break
-            a += 1
+                    
+                    #slide P72
+                    # y^i=a, y^(i+1)=b
+                    numer2 = [[0 for _ in range(self.L)] for _ in range(self.L)]
+                    # P(y^(i+1) =b|y^(i) =a) = self.A[a][b] from state a to state b
+                    # P(x^i |y^i =b) = Prob(emitting seq element x given state y) = self.O[b][seq element]
+                    for a in range(self.L):
+                        for b in range(self.L):
+                            numer2[a][b] = alphas[j][a]*betas[j+1][b]*self.A[a][b]*self.O[b][X[i][j]]
+                    # the denominator2 is the sum of 2D-array numerator2 for every a',b'
+                    denom2 = sum([sum(row) for row in numer2])
+                    # the demoninator2 is ths same for every a since it's the sum
+                    P_ijab[i][j-1] = [[x/denom2 for x in numer2_row] for numer2_row in numer2]
+                    
+            #=======================================
+            # Maximization step
+            # slide p69
+            # update self.A
+            for a in range(self.L):
+                for b in range(self.L):
+                    a_cnt = 0
+                    b_cnt = 0
+                    for i in range(M):
+                        for j in range(len(X[i])-1):
+                            a_cnt+=P_ijab[i][j][a][b]
+                            b_cnt+=P_ija[i][j][a]
+                            
+                    self.A[a][b] = a_cnt/b_cnt if b_cnt else 0
+                    
+            # update self.O
+            for z in range(self.L):
+                for w in range(self.D):
+                    w_cnt = 0
+                    z_cnt = 0
+                    for i in range(M):
+                        for j in range(len(X[i])):
+                            z_cnt+=P_ija[i][j][z]
+                            if X[i][j]==w:
+                                w_cnt += P_ija[i][j][z]
+                    
+                    self.O[z][w] = w_cnt/z_cnt if z_cnt else 0
 
-        return emission, states
-
+    
     def generate_emission(self, M, obs_map_r, syl_dict):
         '''
         Generates an emission of M syllables, assuming that the starting state
@@ -453,66 +291,56 @@ class HiddenMarkovModel:
         '''
 
         emission = []
+        state = random.choice(range(self.L))
         states = []
-        syl_count = 0
-        # print(M)
+        # counter keeping track of number of syllables
+        count = 0
 
-        ### generate the state sequence first
-        # generate the first state
-        r = random.random()
-        s = math.floor(r * self.L)  # need to re write this part with a new start distribution
-        states.append(s)
-        # generate the fist emission
-        r = random.random()
-        threshold = 0
-        for b in range(self.D):
-            threshold += self.O[states[0]][b]
-            if r <= threshold:
-                out = b
-                emission.append(out)
-                break
-        #print(emission[0], out)
-        syl_count += self.get_syl_number(syl_dict, obs_map_r, out, 1)
+        while count < M:
+            # Append state.
 
-        ### generate the subsequent states and emissions
-        a=1
-        while a<=M:
-            r = random.random()
-            threshold = 0
-            for b in range(self.L):
-                threshold += self.A[states[a - 1]][b]
-                if r <= threshold:
-                    s = b
-                    states.append(s)
+            if count == 0:
+                states.append(state)
+            else:
+                # Sample next state.
+                rand_var = random.uniform(0, 1)
+                next_state = 0
+
+                while rand_var > 0:
+                    rand_var -= self.A[state][next_state]
+                    next_state += 1
+
+                next_state -= 1
+                state = next_state
+                states.append(state)
+
+            while True:
+                # Sample next observation.
+                rand_var = random.uniform(0, 1)
+                next_obs = 0
+
+                while rand_var > 0:
+                    rand_var -= self.O[state][next_obs]
+                    next_obs += 1
+
+                next_obs -= 1
+                # amount of syllables needed
+                diff = M - count
+                word = obs_map_r[next_obs]
+                syllable = self.find_syl(word, syl_dict, diff)
+                if syllable != -1:
+                    count += syllable
                     break
-            
-            r = random.random()
-            threshold = 0
-            for b in range(self.D):
-                threshold += self.O[states[a]][b]
-                if r <= threshold:
-                    out = b
-                    syl_count += self.get_syl_number(syl_dict, obs_map_r, out, 0)
-                    if syl_count <= 10:
-                        emission.append(out)
-                        break
-                    if syl_count > 10:
-                        syl_count -= self.get_syl_number(syl_dict, obs_map_r, out, 0)
-                        a-=1
-                        break
-            #print("syllable count is", syl_count)
-            if syl_count == 10:
-                break
-            a += 1
+
+            emission.append(next_obs)
 
         return emission, states
     
-    
-    def generate_emission_rhyme(self, M, obs_map, obs_map_r, syl_dict, first_word,
-                                                                first_state):
+        
+    def generate_emission_with_start(self, M, obs_map, obs_map_r, syl_dict, start_word, start_state):
         '''
-        Generates an emission of M syllables starting with a given word,
-        assuming that the starting state is chosen uniformly at random.
+        Generates an emission of M syllables, assuming that the starting state
+        is chosen uniformly at random.
 
         Arguments:
             M:          Number of Syllables
@@ -524,7 +352,7 @@ class HiddenMarkovModel:
         '''
 
         emission = []
-        state = first_state
+        state = start_state
         states = []
         # counter keeping track of number of syllables
         count = 0
@@ -534,10 +362,9 @@ class HiddenMarkovModel:
 
             if count == 0:
                 states.append(state)
-                emission.append(obs_map[first_word])
-                syllable = self.find_syl(first_word, syl_dict, M)
+                emission.append(obs_map[start_word])
+                syllable = self.find_syl(start_word, syl_dict, M)
                 count += syllable
-
 
             else:
                 # Sample next state.
@@ -552,29 +379,30 @@ class HiddenMarkovModel:
                 state = next_state
                 states.append(state)
 
+            while True:
+                # Sample next observation.
+                rand_var = random.uniform(0, 1)
+                next_obs = 0
 
-                while True:
-                    # Sample next observation.
-                    rand_var = random.uniform(0, 1)
-                    next_obs = 0
+                while rand_var > 0:
+                    rand_var -= self.O[state][next_obs]
+                    next_obs += 1
 
-                    while rand_var > 0:
-                        rand_var -= self.O[state][next_obs]
-                        next_obs += 1
+                next_obs -= 1
+                # amount of syllables needed
+                diff = M - count
+                word = obs_map_r[next_obs]
+                syllable = self.find_syl(word, syl_dict, diff)
+                if syllable != -1:
+                    count += syllable
+                    break
 
-                    next_obs -= 1
-                    # amount of syllables needed
-                    diff = M - count
-                    word = obs_map_r[next_obs]
-                    syllable = self.find_syl(word, syl_dict, diff)
-                    if syllable != -1:
-                        count += syllable
-                        break
-
-                emission.append(next_obs)
+            emission.append(next_obs)
 
         return emission, states
 
+
+    
 
     def find_state(self, x):
         '''
